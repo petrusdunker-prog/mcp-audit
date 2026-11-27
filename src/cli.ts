@@ -22,13 +22,21 @@ program
   });
 
 program
-  .command("live <command> [args...]")
-  .description("Launch an MCP server over stdio and introspect its declared tools (Mode B)")
+  .command("live [command] [args...]")
+  .description(
+    "Introspect an MCP server's declared tools (Mode B) — launch over stdio, or dial --url with no credentials"
+  )
   .passThroughOptions()
   .enablePositionalOptions()
+  .option("-u, --url <url>", "HTTP(S) URL to connect to instead of spawning a stdio command")
   .option("--json", "output JSON instead of human-readable text")
-  .action(async (command: string, args: string[], opts: { json?: boolean }) => {
-    const report = await auditLive({ command, args });
+  .action(async (command: string | undefined, args: string[], opts: { url?: string; json?: boolean }) => {
+    if (!opts.url && !command) {
+      console.error("Provide either a stdio <command> or --url <url>");
+      process.exitCode = 1;
+      return;
+    }
+    const report = await auditLive({ command, args, url: opts.url });
     opts.json ? console.log(toJson(report)) : printReport(report);
   });
 

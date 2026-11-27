@@ -1,21 +1,17 @@
 import type { AuditReport } from "../types.js";
+import { checkAuth } from "../checks/authCheck.js";
 
 /**
- * Mode A: static scan of a local MCP server repo (auth checks, dependency
- * CVEs, secret leakage, permission over-reach). Not implemented until
- * Phase 1 — this stub exists so the CLI surface is stable now.
+ * Mode A: static scan of a local MCP server repo.
+ * Phase 1: auth check only. Dependency CVEs, secret leakage, and permission
+ * over-reach checks land in later phases.
  */
 export async function auditSource(path: string): Promise<AuditReport> {
+  const findings = await checkAuth(path);
+
   return {
     target: path,
     mode: "source",
-    findings: [
-      {
-        id: "source.not-implemented",
-        severity: "info",
-        title: "Source scan not implemented yet",
-        detail: "Static checks (auth, dependency CVEs, secrets, permission scope) land in Phase 1.",
-      },
-    ],
+    findings,
   };
 }
