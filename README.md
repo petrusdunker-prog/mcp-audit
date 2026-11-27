@@ -5,7 +5,7 @@ authentication, vulnerable dependencies, leaked secrets, and overly broad tool
 permissions — the kind of issues that show up repeatedly across public MCP
 servers today.
 
-## Status: Phase 4 (SARIF output + GitHub Action)
+## Status: Phase 5 (validated against 17 real public servers — see `VALIDATION.md`)
 
 Two scan modes:
 
@@ -132,6 +132,12 @@ one-off manual checks used while building each phase — this is what CI runs.
   not nested/hoisted workspace members — in an npm-workspaces monorepo,
   scan each workspace member's own directory (where its `package.json` is),
   not just the root.
+- **The generic secret heuristic is noisy on real codebases** — validated
+  against 17 real public MCP servers (see `VALIDATION.md`), its two biggest
+  false-positive sources are test/e2e fixture values and documentation prose
+  that merely mentions `token=`/`secret:` syntax inside a comment. This is
+  why it sits at MEDIUM with "verify manually" wording rather than CRITICAL —
+  but don't read a MEDIUM hit as "probably a real leak" without checking.
 - Every check here is a heuristic, not a guarantee — see the specific
   caveats in each check's own section above.
 
@@ -141,6 +147,6 @@ one-off manual checks used while building each phase — this is what CI runs.
 2. ~~Auth check (source + live)~~
 3. ~~Dependency vulnerability check (OSV.dev)~~
 4. ~~Secret leakage + permission over-reach checks~~
-5. ~~Reporting polish (SARIF) + GitHub Action~~ (this phase)
-6. Validation run against public servers + publish findings
+5. ~~Reporting polish (SARIF) + GitHub Action~~
+6. ~~Validation run against public servers + publish findings~~ (this phase — see `VALIDATION.md`)
 7. (later) Claude Skill wrapper, prompt-injection heuristics, dynamic probing
