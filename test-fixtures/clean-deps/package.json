@@ -1,0 +1,7 @@
+{
+  "name": "fixture-clean-deps",
+  "version": "0.0.1",
+  "dependencies": {
+    "commander": "13.1.0"
+  }
+}

@@ -1,6 +1,5 @@
 import type { AuditReport, Severity } from "./types.js";
-
-const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
+import { severityRank } from "./severity.js";
 
 const SEVERITY_LABEL: Record<Severity, string> = {
   critical: "[CRITICAL]",
@@ -19,7 +18,7 @@ export function printReport(report: AuditReport): void {
   }
 
   const sorted = [...report.findings].sort(
-    (a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)
+    (a, b) => severityRank(a.severity) - severityRank(b.severity)
   );
 
   for (const finding of sorted) {
