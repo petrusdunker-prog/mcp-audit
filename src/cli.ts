@@ -3,6 +3,33 @@ import { Command } from "commander";
 import { auditSource } from "./modes/sourceScan.js";
 import { auditLive } from "./modes/liveIntrospect.js";
 import { printReport, toJson } from "./report.js";
+import { toSarif } from "./sarif.js";
+import { hasFindingAtOrAbove } from "./severity.js";
+import type { AuditReport, Severity } from "./types.js";
+
+const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
+
+interface OutputOpts {
+  format?: "text" | "json" | "sarif";
+  failOn?: Severity;
+}
+
+function emitReport(report: AuditReport, opts: OutputOpts): void {
+  switch (opts.format) {
+    case "sarif":
+      console.log(toSarif(report));
+      break;
+    case "json":
+      console.log(toJson(report));
+      break;
+    default:
+      printReport(report);
+  }
+
+  if (opts.failOn && hasFindingAtOrAbove(report, opts.failOn)) {
+    process.exitCode = 1;
+  }
+}
 
 const program = new Command();
 
@@ -15,10 +42,11 @@ program
 program
   .command("scan <path>")
   .description("Static scan of a local MCP server repo (Mode A)")
-  .option("--json", "output JSON instead of human-readable text")
-  .action(async (path: string, opts: { json?: boolean }) => {
+  .option("--format <format>", "text, json, or sarif", "text")
+  .option("--fail-on <severity>", `exit 1 if any finding is at least this severe (${SEVERITIES.join("|")})`)
+  .action(async (path: string, opts: { format: string; failOn?: string }) => {
     const report = await auditSource(path);
-    opts.json ? console.log(toJson(report)) : printReport(report);
+    emitReport(report, { format: opts.format as OutputOpts["format"], failOn: opts.failOn as Severity | undefined });
   });
 
 program
@@ -29,15 +57,22 @@ program
   .passThroughOptions()
   .enablePositionalOptions()
   .option("-u, --url <url>", "HTTP(S) URL to connect to instead of spawning a stdio command")
-  .option("--json", "output JSON instead of human-readable text")
-  .action(async (command: string | undefined, args: string[], opts: { url?: string; json?: boolean }) => {
-    if (!opts.url && !command) {
-      console.error("Provide either a stdio <command> or --url <url>");
-      process.exitCode = 1;
-      return;
+  .option("--format <format>", "text, json, or sarif", "text")
+  .option("--fail-on <severity>", `exit 1 if any finding is at least this severe (${SEVERITIES.join("|")})`)
+  .action(
+    async (
+      command: string | undefined,
+      args: string[],
+      opts: { url?: string; format: string; failOn?: string }
+    ) => {
+      if (!opts.url && !command) {
+        console.error("Provide either a stdio <command> or --url <url>");
+        process.exitCode = 1;
+        return;
+      }
+      const report = await auditLive({ command, args, url: opts.url });
+      emitReport(report, { format: opts.format as OutputOpts["format"], failOn: opts.failOn as Severity | undefined });
     }
-    const report = await auditLive({ command, args, url: opts.url });
-    opts.json ? console.log(toJson(report)) : printReport(report);
-  });
+  );
 
 program.parseAsync(process.argv);

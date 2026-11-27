@@ -1,0 +1,63 @@
+name: "mcp-audit"
+description: "Static security scan of an MCP server repo: auth posture, dependency CVEs, leaked secrets. Uploads results as code-scanning alerts."
+branding:
+  icon: "shield"
+  color: "red"
+
+inputs:
+  path:
+    description: "Path to the MCP server repo to scan, relative to the workspace."
+    required: false
+    default: "."
+  fail-on:
+    description: "Minimum severity that fails the job (critical|high|medium|low|info). Leave empty to never fail the job on findings."
+    required: false
+    default: ""
+  sarif-file:
+    description: "Where to write the SARIF report before uploading it."
+    required: false
+    default: "mcp-audit-results.sarif"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+
+    - name: Install mcp-audit
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npm ci
+
+    - name: Build mcp-audit
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npm run build
+
+    # Runs the scan exactly once. Exit code is captured (not let to fail
+    # this step directly) so the SARIF upload below still happens even when
+    # --fail-on trips — alerts should land in the Security tab regardless
+    # of whether the job itself ends up red.
+    - name: Run mcp-audit scan
+      id: scan
+      shell: bash
+      run: |
+        set +e
+        FAIL_ON_ARGS=()
+        if [ -n "${{ inputs.fail-on }}" ]; then
+          FAIL_ON_ARGS=(--fail-on "${{ inputs.fail-on }}")
+        fi
+        node "${{ github.action_path }}/dist/cli.js" scan "${{ inputs.path }}" --format sarif "${FAIL_ON_ARGS[@]}" > "${{ inputs.sarif-file }}"
+        echo "exit-code=$?" >> "$GITHUB_OUTPUT"
+
+    - name: Upload SARIF to code scanning
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.sarif-file }}
+
+    - name: Fail job if findings met the --fail-on threshold
+      if: ${{ inputs.fail-on != '' && steps.scan.outputs.exit-code != '0' }}
+      shell: bash
+      run: exit 1

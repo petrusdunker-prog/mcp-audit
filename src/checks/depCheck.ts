@@ -187,6 +187,7 @@ export async function checkDependencies(repoPath: string): Promise<Finding[]> {
         (dep.source === "declared"
           ? " [version inferred from package.json's range, not a lockfile — verify the actually-installed version]"
           : ""),
+      location: { file: "package.json" },
     });
   }
 

@@ -1,0 +1,44 @@
+# NOTE: GitHub only discovers workflows at the *repository root's*
+# .github/workflows/ — while mcp-audit lives as a subdirectory of a larger
+# personal vault repo, this file is inert. It takes effect once mcp-audit
+# is published as its own standalone repository (see README roadmap,
+# phase 6).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - run: npm test
+
+  self-scan:
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      # No fail-on here deliberately: test-fixtures/ contains credentials
+      # and auth gaps on purpose, to validate the checks themselves (see
+      # test/fixtures.test.mjs). Hardcoding an exclusion for a directory
+      # named "test-fixtures" into the checks would weaken them for real
+      # users who might have a genuinely vulnerable directory by that same
+      # name — so this upload is for visibility/triage, not a hard gate.
+      - name: Scan this repo with its own action
+        uses: ./
+        with:
+          path: "."

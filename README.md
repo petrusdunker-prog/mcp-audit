@@ -5,7 +5,7 @@ authentication, vulnerable dependencies, leaked secrets, and overly broad tool
 permissions — the kind of issues that show up repeatedly across public MCP
 servers today.
 
-## Status: Phase 3 (secret leakage + permission over-reach)
+## Status: Phase 4 (SARIF output + GitHub Action)
 
 Two scan modes:
 
@@ -65,10 +65,34 @@ node dist/cli.js live npx -y @modelcontextprotocol/server-everything
 # Mode B — HTTP target (no credentials sent)
 node dist/cli.js live --url http://127.0.0.1:3001/mcp
 
-# JSON output
-node dist/cli.js scan ./path --json
-node dist/cli.js live --json npx -y @modelcontextprotocol/server-everything  # --json must come BEFORE the stdio command
+# Output formats: text (default), json, sarif
+node dist/cli.js scan ./path --format json
+node dist/cli.js scan ./path --format sarif > results.sarif
+node dist/cli.js live --format json npx -y @modelcontextprotocol/server-everything  # flags must come BEFORE the stdio command
+
+# Exit 1 if any finding is at least this severe — for CI
+node dist/cli.js scan ./path --fail-on high
 ```
+
+### GitHub Action
+
+Once this is published as its own repository, `action.yml` at its root makes
+it usable as a composite action from any other repo:
+
+```yaml
+- uses: your-org/mcp-audit@main
+  with:
+    path: .            # repo to scan, default "."
+    fail-on: high      # optional; omit to never fail the job on findings
+permissions:
+  security-events: write  # required for the SARIF upload step
+```
+
+It builds the tool, runs `scan --format sarif`, uploads the result via
+`github/codeql-action/upload-sarif` (alerts show up in the repo's Security
+tab), and — if `fail-on` is set — fails the job afterward without needing a
+second scan. See `.github/workflows/ci.yml` for this repo's own CI, including
+a self-scan job that dogfoods the action against its own source.
 
 ## Test fixtures
 
@@ -86,16 +110,37 @@ version with a long-settled historical CVE, so it won't age out):
 - `live-permission-mismatch/` — a tiny **runnable** stdio server (unlike the
   others) with one tool whose name/description deliberately mismatch, used
   to validate the Mode B permission check end-to-end:
-  `node dist/cli.js live --json npx tsx test-fixtures/live-permission-mismatch/server.ts`
+  `node dist/cli.js live --format json npx tsx test-fixtures/live-permission-mismatch/server.ts`
 
 Everything else is read as text only, never executed.
+
+`npm test` runs all of the above as a real regression suite
+(`test/fixtures.test.mjs`, via Node's built-in test runner) instead of the
+one-off manual checks used while building each phase — this is what CI runs.
+
+## Known limitations
+
+- **Auth and secret checks pool findings across the whole scanned tree.**
+  Point them at one server's own directory, not a monorepo root containing
+  several unrelated servers — a sibling subfolder with real auth code will
+  mask a finding that a different subfolder genuinely has none. (Running
+  `scan .` on this very repo demonstrates it: the auth check sees the
+  `http-with-auth` fixture's auth code and the `http-no-auth` fixture's
+  missing auth together, and reports the former rather than flagging the
+  latter.) Scan each server's directory individually.
+- **Dependency check only resolves top-level `package-lock.json` entries**,
+  not nested/hoisted workspace members — in an npm-workspaces monorepo,
+  scan each workspace member's own directory (where its `package.json` is),
+  not just the root.
+- Every check here is a heuristic, not a guarantee — see the specific
+  caveats in each check's own section above.
 
 ## Roadmap
 
 1. ~~Scaffolding~~
 2. ~~Auth check (source + live)~~
 3. ~~Dependency vulnerability check (OSV.dev)~~
-4. ~~Secret leakage + permission over-reach checks~~ (this phase)
-5. Reporting polish (SARIF) + GitHub Action
+4. ~~Secret leakage + permission over-reach checks~~
+5. ~~Reporting polish (SARIF) + GitHub Action~~ (this phase)
 6. Validation run against public servers + publish findings
 7. (later) Claude Skill wrapper, prompt-injection heuristics, dynamic probing

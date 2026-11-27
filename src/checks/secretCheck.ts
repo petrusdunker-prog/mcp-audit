@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Finding } from "../types.js";
+import { toRelPosix } from "../relPath.js";
 
 const SCAN_EXTENSIONS = new Set([
   ".ts",
@@ -91,7 +92,7 @@ export async function checkSecrets(repoPath: string): Promise<Finding[]> {
     } catch {
       continue;
     }
-    const rel = path.relative(repoPath, file);
+    const rel = toRelPosix(repoPath, file);
 
     for (const pattern of KNOWN_FORMAT_PATTERNS) {
       if (pattern.regex.test(content)) {
@@ -101,6 +102,7 @@ export async function checkSecrets(repoPath: string): Promise<Finding[]> {
           severity: "critical",
           title: `Likely ${pattern.label} found in ${rel}`,
           detail: `Matched the known shape of a ${pattern.label}. If this is real, rotate the credential and scrub it from git history, not just this file.`,
+          location: { file: rel },
         });
       }
     }
@@ -116,6 +118,7 @@ export async function checkSecrets(repoPath: string): Promise<Finding[]> {
         severity: "medium",
         title: `Possible hardcoded credential in ${rel}`,
         detail: `Found a string literal assigned to a credential-sounding name: "${match[0].slice(0, 80)}". Could be real, or a test/example value — this heuristic can't tell the difference, verify manually.`,
+        location: { file: rel },
       });
     }
   }
