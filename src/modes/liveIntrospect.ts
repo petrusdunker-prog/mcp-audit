@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { AuditReport, Finding } from "../types.js";
+import { checkToolPermissions } from "../checks/permissionCheck.js";
 
 export interface LiveTarget {
   command?: string;
@@ -60,6 +61,8 @@ export async function auditLive(target: LiveTarget): Promise<AuditReport> {
         detail: tool.description?.slice(0, 200) ?? "(no description)",
       });
     }
+
+    findings.push(...checkToolPermissions(tools));
   } catch (err) {
     if (target.url) {
       findings.push({

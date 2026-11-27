@@ -5,37 +5,50 @@ authentication, vulnerable dependencies, leaked secrets, and overly broad tool
 permissions — the kind of issues that show up repeatedly across public MCP
 servers today.
 
-## Status: Phase 2 (dependency vulnerability check)
+## Status: Phase 3 (secret leakage + permission over-reach)
 
 Two scan modes:
 
 - **Mode A — source scan** (`mcp-audit scan <path>`): static analysis of a
   cloned MCP server's code and config.
-  - Implemented: auth check. Detects whether the server uses a network
-    transport (HTTP/SSE) at all; if so, looks for credential-based auth
-    (Authorization header, API key, OAuth, JWT) or, failing that, a
-    loopback-bind/Origin-validation restriction (the pattern the official MCP
-    reference servers use). stdio-only servers are marked not-applicable.
-  - Implemented: npm dependency vulnerability check. Resolves each
-    dependency's exact version from `package-lock.json` when present
-    (otherwise falls back to the semver range in `package.json`, flagged as
-    less reliable), then queries [OSV.dev](https://osv.dev) for known CVEs.
-    Other ecosystems (pip, etc.) aren't covered yet.
-  - Not yet implemented: secret leakage, permission over-reach (land in
-    later phases).
+  - Auth check. Detects whether the server uses a network transport
+    (HTTP/SSE) at all; if so, looks for credential-based auth (Authorization
+    header, API key, OAuth, JWT) or, failing that, a loopback-bind/Origin-
+    validation restriction (the pattern the official MCP reference servers
+    use). stdio-only servers are marked not-applicable.
+  - npm dependency vulnerability check. Resolves each dependency's exact
+    version from `package-lock.json` when present (otherwise falls back to
+    the semver range in `package.json`, flagged as less reliable), then
+    queries [OSV.dev](https://osv.dev) for known CVEs. Other ecosystems
+    (pip, etc.) aren't covered yet.
+  - Secret leakage check. A small set of specific, low-false-positive known
+    credential formats (AWS/GitHub/Slack/Stripe/Google keys, private key
+    blocks) at CRITICAL, plus a noisier generic "credential-sounding name
+    assigned a literal string" heuristic at MEDIUM, filtered against obvious
+    placeholders.
 - **Mode B — live introspection** (`mcp-audit live <command> [args...]` or
   `mcp-audit live --url <url>`): connects to a running MCP server and lists
-  its declared tools. With `--url`, the connection attempt itself *is* the
-  auth check — if it succeeds with zero credentials offered, that's flagged.
+  its declared tools.
+  - With `--url`, the connection attempt itself *is* the auth check — if it
+    succeeds with zero credentials offered, that's flagged.
+  - Permission-scope-mismatch check: flags a tool whose name reads as a
+    narrow getter (`get_`/`read_`/`list_`/...) but whose description admits
+    a mutating action (delete/write/modify/create/exec/...). Only catches
+    this one specific pattern, not over-broad permissions in general.
 
-This is a heuristic tool, not a guarantee. It's intentionally conservative:
-tested against the official `modelcontextprotocol/servers` reference repo,
-the loopback+Origin-validation pattern used by every server there is called
-out as a weaker "restricted but uncredentialed" signal (MEDIUM), not treated
-the same as no protection at all (HIGH) — see `src/checks/authCheck.ts`. The
-dependency check caught a real, currently-open vulnerability in that same
-repo (a memory-exhaustion DoS in the `zod` version the filesystem server
-depends on) during testing — see `src/checks/depCheck.ts`.
+This is a heuristic tool, not a guarantee. It's intentionally conservative —
+each check so far has been tuned against real false positives found by
+testing against the official `modelcontextprotocol/servers` reference repo,
+not just synthetic fixtures:
+- **Auth check**: the loopback+Origin-validation pattern used by every
+  server there is its own weaker "restricted but uncredentialed" tier
+  (MEDIUM), not lumped in with no protection at all (HIGH).
+- **Dependency check**: caught a real, currently-open memory-exhaustion DoS
+  in the `zod` version the filesystem server depends on.
+- **Permission check**: an early wordlist (`all`/`every`/`admin`) would have
+  flagged the reference server's own `get-env` debug tool ("Returns all
+  environment variables...") as a false positive; the wordlist was narrowed
+  to specific mutating verbs before shipping.
 
 ## Usage
 
@@ -52,8 +65,9 @@ node dist/cli.js live npx -y @modelcontextprotocol/server-everything
 # Mode B — HTTP target (no credentials sent)
 node dist/cli.js live --url http://127.0.0.1:3001/mcp
 
-# JSON output (either mode)
+# JSON output
 node dist/cli.js scan ./path --json
+node dist/cli.js live --json npx -y @modelcontextprotocol/server-everything  # --json must come BEFORE the stdio command
 ```
 
 ## Test fixtures
@@ -66,15 +80,22 @@ version with a long-settled historical CVE, so it won't age out):
 - `stdio-only/`, `http-no-auth/`, `http-with-auth/` — auth-check branches.
 - `vulnerable-deps/`, `clean-deps/` — dependency-check branches (`lodash@4.17.15`
   has several known CVEs; `commander@13.1.0` doesn't).
+- `secret-known/`, `secret-generic/`, `secret-clean/` — secret-check branches
+  (fake-but-correctly-shaped AWS/GitHub credentials; a generic credential-
+  sounding assignment; env-var-only, no literals).
+- `live-permission-mismatch/` — a tiny **runnable** stdio server (unlike the
+  others) with one tool whose name/description deliberately mismatch, used
+  to validate the Mode B permission check end-to-end:
+  `node dist/cli.js live --json npx tsx test-fixtures/live-permission-mismatch/server.ts`
 
-None of these are meant to run — the scanner only reads their source/manifest text.
+Everything else is read as text only, never executed.
 
 ## Roadmap
 
 1. ~~Scaffolding~~
 2. ~~Auth check (source + live)~~
-3. ~~Dependency vulnerability check (OSV.dev)~~ (this phase)
-4. Secret leakage + permission over-reach checks
+3. ~~Dependency vulnerability check (OSV.dev)~~
+4. ~~Secret leakage + permission over-reach checks~~ (this phase)
 5. Reporting polish (SARIF) + GitHub Action
 6. Validation run against public servers + publish findings
 7. (later) Claude Skill wrapper, prompt-injection heuristics, dynamic probing
