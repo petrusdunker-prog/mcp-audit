@@ -149,5 +149,27 @@ one-off manual checks used while building each phase — this is what CI runs.
 3. ~~Dependency vulnerability check (OSV.dev)~~
 4. ~~Secret leakage + permission over-reach checks~~
 5. ~~Reporting polish (SARIF) + GitHub Action~~
-6. ~~Validation run against public servers + publish findings~~ (this phase — see `VALIDATION.md`)
-7. (later) Claude Skill wrapper, prompt-injection heuristics, dynamic probing
+6. ~~Validation run against public servers + publish findings~~ (see `VALIDATION.md`)
+7. **Drift/integrity detection (planned, not started).** Give the tool memory
+   between runs: hash the sensitive surfaces (auth code, the tool manifest,
+   `.env`, the dependency lockfile) at scan time, store a small baseline,
+   diff on the next run. Flags changes that happened without anyone
+   explicitly reviewing them as security-relevant — a tool's permissions
+   quietly widening, auth code disappearing from a file. Fits the GitHub
+   Action naturally: compare a PR's scan against main's last baseline.
+8. **Prompt-injection heuristics (planned, not started).** Scan tool
+   descriptions/outputs for language that reads like it's trying to
+   manipulate the calling LLM rather than describe the tool. High
+   false-positive risk — will need the same tune-against-real-servers
+   process every other check here went through.
+9. **Dynamic/live probing (planned, not started).** Behavioral checks beyond
+   "did it accept zero credentials" — input validation, rate-limiting.
+   Ethically narrower in scope than the static checks: only ever run against
+   servers you control yourself, never third-party infrastructure without
+   permission.
+
+**Explicitly out of scope for this roadmap:** watching actual tool-call
+traffic in real time to catch a tool doing something beyond what it was
+asked for a given invocation. That's a fundamentally different product (a
+proxy/interceptor sitting between the agent and the server, not a scanner)
+and isn't planned as an extension of this tool.
