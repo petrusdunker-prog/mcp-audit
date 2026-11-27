@@ -1,8 +1,3 @@
-# NOTE: GitHub only discovers workflows at the *repository root's*
-# .github/workflows/ — while mcp-audit lives as a subdirectory of a larger
-# personal vault repo, this file is inert. It takes effect once mcp-audit
-# is published as its own standalone repository (see README roadmap,
-# phase 6).
 name: CI
 
 on:

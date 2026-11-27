@@ -76,11 +76,12 @@ node dist/cli.js scan ./path --fail-on high
 
 ### GitHub Action
 
-Once this is published as its own repository, `action.yml` at its root makes
-it usable as a composite action from any other repo:
+Published at [petrusdunker-prog/mcp-audit](https://github.com/petrusdunker-prog/mcp-audit).
+`action.yml` at its root makes it usable as a composite action from any other
+repo:
 
 ```yaml
-- uses: your-org/mcp-audit@main
+- uses: petrusdunker-prog/mcp-audit@main
   with:
     path: .            # repo to scan, default "."
     fail-on: high      # optional; omit to never fail the job on findings

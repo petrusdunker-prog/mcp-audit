@@ -97,6 +97,7 @@ export function toSarif(report: AuditReport): string {
         tool: {
           driver: {
             name: "mcp-audit",
+            informationUri: "https://github.com/petrusdunker-prog/mcp-audit",
             version: "0.1.0",
             rules: [...rulesUsed.values()].map((rule) => ({
               id: rule.id,

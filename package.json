@@ -14,6 +14,10 @@
     "test": "npm run build && node --test"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/petrusdunker-prog/mcp-audit.git"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
     "commander": "^13.1.0"
