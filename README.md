@@ -102,6 +102,20 @@ results aren't naturally "new vs. resolved" — see the GitHub Action section
 for how the two combine instead). Mode B (live) baselining isn't supported
 yet — only `scan`.
 
+The diff works by comparing finding ids between two reports, not by hashing
+files — every finding already has a stable id (`deps.vuln.lodash`,
+`perm.scope-mismatch.get_user_profile`), so a baseline is just a saved
+report and diffing means set-comparing two id lists. That only works if an
+id doesn't drift for reasons that have nothing to do with the underlying
+issue — the generic secret check originally keyed a finding on the matched
+text's character offset in the file, which shifts whenever unrelated
+content earlier in the file changes, and would have produced false
+new+resolved pairs for the exact same literal match on every unrelated
+edit. It's now keyed on a hash of the matched content instead. Worth
+knowing if you're reading raw JSON reports or building on top of this:
+finding ids are designed to be stable across unrelated changes, not just
+stable within one run.
+
 ### GitHub Action
 
 Published at [petrusdunker-prog/mcp-audit](https://github.com/petrusdunker-prog/mcp-audit).
