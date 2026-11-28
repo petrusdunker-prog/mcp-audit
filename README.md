@@ -5,7 +5,7 @@ authentication, vulnerable dependencies, leaked secrets, and overly broad tool
 permissions — the kind of issues that show up repeatedly across public MCP
 servers today.
 
-## Status: Phase 7 (drift detection — baseline a scan, diff future ones against it)
+## Status: Phase 8 (prompt-injection heuristics for Mode B)
 
 Two scan modes:
 
@@ -35,6 +35,16 @@ Two scan modes:
     narrow getter (`get_`/`read_`/`list_`/...) but whose description admits
     a mutating action (delete/write/modify/create/exec/...). Only catches
     this one specific pattern, not over-broad permissions in general.
+  - Prompt-injection check: scans every tool's full metadata (name,
+    description, and declared input schema — a parameter's own description
+    can carry an injection as easily as the tool's) for three documented,
+    narrow techniques: a fake system/role marker (`SYSTEM:`, `[INST]`,
+    `<|im_start|>`, ...), language aimed at overriding the calling model's
+    behavior rather than describing the tool ("ignore previous
+    instructions", "without telling the user", ...), and hidden/invisible
+    Unicode characters (zero-width spaces, Unicode Tag characters, bidi
+    overrides — the "ASCII smuggling" technique). Not a general "sounds
+    suspicious" filter — three specific, documented patterns, nothing else.
 
 This is a heuristic tool, not a guarantee. It's intentionally conservative —
 each check so far has been tuned against real false positives found by
@@ -49,6 +59,15 @@ not just synthetic fixtures:
   flagged the reference server's own `get-env` debug tool ("Returns all
   environment variables...") as a false positive; the wordlist was narrowed
   to specific mutating verbs before shipping.
+- **Secret check**: scanning a real security-conscious project
+  (`AgentValet/AgentValet`) turned up 12 false positives from code that
+  itself handles/validates secrets rather than leaking one — see
+  `VALIDATION.md` and the Known Limitations section below.
+- **Prompt-injection check**: validated against 53 tools across 5 real
+  servers (the official reference server, two more official servers, and
+  two popular community servers) with zero false positives so far — see
+  `VALIDATION.md` for the real text-extraction bug this testing caught
+  before it shipped.
 
 ## Usage
 
@@ -165,14 +184,26 @@ version with a long-settled historical CVE, so it won't age out):
 - `vulnerable-deps/`, `clean-deps/` — dependency-check branches (`lodash@4.17.15`
   has several known CVEs; `commander@13.1.0` doesn't).
 - `secret-known/`, `secret-generic/`, `secret-clean/` — secret-check branches
-  (fake-but-correctly-shaped AWS/GitHub credentials; a generic credential-
-  sounding assignment; env-var-only, no literals).
+  (fake-but-correctly-shaped AWS/GitHub/private-key credentials, low-entropy
+  so they don't trip a real scanner the way an earlier draft did on push; a
+  generic credential-sounding assignment; env-var-only, no literals).
+- `secret-known-placeholder/` — the exact real-world false positives found
+  scanning AgentValet/AgentValet (AWS's own canonical example key, a
+  GitHub-token-shaped placeholder, etc.) — should produce zero findings.
 - `live-permission-mismatch/` — a tiny **runnable** stdio server (unlike the
-  others) with one tool whose name/description deliberately mismatch, used
-  to validate the Mode B permission check end-to-end:
+  non-`live-*` fixtures above) with one tool whose name/description
+  deliberately mismatch, used to validate the Mode B permission check
+  end-to-end:
   `node dist/cli.js live --format json npx tsx test-fixtures/live-permission-mismatch/server.ts`
+- `live-prompt-injection/` — another runnable stdio server, with one benign
+  tool and three carrying a different injection technique each (fake role
+  marker, override language, hidden Unicode), used to validate the
+  prompt-injection check end-to-end.
 
-Everything else is read as text only, never executed.
+Everything else is read as text only, never executed. (The committed Slack
+token test is the exception that proves this isn't just a formality — it's
+tested at runtime instead, in `test/secret-stability.test.mjs`, specifically
+*because* a committed one trips GitHub's own push protection.)
 
 `npm test` runs all of the above as a real regression suite
 (`test/fixtures.test.mjs`, via Node's built-in test runner) instead of the
@@ -230,11 +261,17 @@ one-off manual checks used while building each phase — this is what CI runs.
    this repo's own CI with a real committed baseline. Mode B (live)
    baselining and pairing "same category got worse" into one escalation
    entry are still out of scope — plain new/resolved already does the job.
-8. **Prompt-injection heuristics (planned, not started).** Scan tool
-   descriptions/outputs for language that reads like it's trying to
-   manipulate the calling LLM rather than describe the tool. High
-   false-positive risk — will need the same tune-against-real-servers
-   process every other check here went through.
+8. ~~Prompt-injection heuristics~~ — three narrow, documented techniques
+   (fake role marker, override language, hidden Unicode) scanned across a
+   tool's full metadata including its input schema, on Mode B only.
+   Validated against 53 tools across 5 real servers, zero false positives
+   so far — see `VALIDATION.md`, including a real text-extraction bug this
+   testing caught (`JSON.stringify` escapes a real newline to a literal
+   `\n`, which glues a word character in front of whatever follows and can
+   silently defeat a `\b` boundary check right where a fake role marker
+   realistically sits — on its own line). Mode A (static) coverage and
+   output-content scanning (vs. just declared metadata) are both out of
+   scope — this tool only ever introspects a tool list, it never calls one.
 9. **Dynamic/live probing (planned, not started).** Behavioral checks beyond
    "did it accept zero credentials" — input validation, rate-limiting.
    Ethically narrower in scope than the static checks: only ever run against

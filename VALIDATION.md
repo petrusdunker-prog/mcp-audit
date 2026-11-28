@@ -175,3 +175,46 @@ exact shape — there's no general way to distinguish "this is a secret
 being stored" from "this is a shape being checked for" without real code
 analysis, which is beyond what a regex-based scanner can do. Documented as
 a known limitation rather than a bug still owed.
+
+## Addendum: prompt-injection check, real-server validation (Phase 8)
+
+Three narrow, documented techniques (fake system/role marker, override
+language aimed at the calling model, hidden/invisible Unicode) scanned
+across every tool's full metadata — name, description, and declared input
+schema, since a parameter's own description can carry an injection as
+easily as the tool's.
+
+**A real bug, caught before shipping.** The first implementation combined
+a tool's fields with `JSON.stringify(tool)` before running the patterns
+against the result. `JSON.stringify` escapes a real newline character to
+the two literal characters `\` and `n` in its *output text* — and a
+synthetic fixture built specifically to test the realistic attack shape
+("normal description text, then a fake role marker on its own new line")
+failed to trigger the role-marker check, because the `n` from that escape
+sequence sat directly in front of "SYSTEM:" with no actual whitespace,
+defeating the pattern's `\b` word-boundary check. Fixed by extracting the
+real string values from the tool object directly (recursing through the
+schema) and joining them with real newlines, never going through JSON's
+escaping. Caught by testing the fixture before trusting it, not by
+accident — exactly the discipline this whole validation file exists to
+demonstrate.
+
+**Real-server validation**: 53 tools across 5 real, independently-built
+servers, zero false positives:
+
+| Server | Tools | How it's launched |
+|---|---|---|
+| `@modelcontextprotocol/server-everything` (official) | 16 | `npx -y` |
+| `@modelcontextprotocol/server-memory` (official) | 9 | `npx -y` |
+| `@modelcontextprotocol/server-sequential-thinking` (official) | 1 | `npx -y` |
+| `@playwright/mcp` (Microsoft, community) | 25 | `npx -y` |
+| `@upstash/context7-mcp` (community) | 2 | `npx -y` |
+
+This is a smaller real-world sample than the secret check's 17-repo run
+(Mode B requires an actually-launchable process, not just a cloned
+directory, which rules out most of a systematic GitHub sample without
+individual setup) — treat it as an encouraging first pass, not the same
+weight of evidence as the static checks have. The roadmap's own warning
+about this check (high false-positive risk, needs the same
+tune-against-real-servers process) still holds for anything beyond these
+three narrow, well-documented patterns.

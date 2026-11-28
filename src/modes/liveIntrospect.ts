@@ -3,6 +3,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { AuditReport, Finding } from "../types.js";
 import { checkToolPermissions } from "../checks/permissionCheck.js";
+import { checkPromptInjection } from "../checks/injectionCheck.js";
 
 export interface LiveTarget {
   command?: string;
@@ -63,6 +64,7 @@ export async function auditLive(target: LiveTarget): Promise<AuditReport> {
     }
 
     findings.push(...checkToolPermissions(tools));
+    findings.push(...checkPromptInjection(tools));
   } catch (err) {
     if (target.url) {
       findings.push({

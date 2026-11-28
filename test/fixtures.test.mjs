@@ -80,3 +80,27 @@ test("permissions (live): a narrow name with a mutating description is flagged",
   assert.ok(report.findings.some((f) => f.id === "perm.scope-mismatch.get_user_profile"));
   assert.ok(!report.findings.some((f) => f.id === "perm.scope-mismatch.get_status"));
 });
+
+test("prompt injection (live): fake role marker, override language, and hidden Unicode are each flagged; a benign tool is not", async () => {
+  const report = await auditLive({
+    command: "npx",
+    args: ["tsx", fixture("live-prompt-injection/server.ts")],
+  });
+  assert.ok(report.findings.some((f) => f.id === "injection.role-marker.get_summary"), "fake role marker not caught");
+  assert.ok(
+    report.findings.some((f) => f.id === "injection.override-language.get_summary"),
+    "override language not caught on get_summary"
+  );
+  assert.ok(
+    report.findings.some((f) => f.id === "injection.override-language.get_notes"),
+    "override language not caught on get_notes"
+  );
+  assert.ok(
+    report.findings.some((f) => f.id === "injection.hidden-unicode.get_status"),
+    "hidden Unicode not caught"
+  );
+  assert.ok(
+    !report.findings.some((f) => f.id.startsWith("injection.") && f.id.endsWith(".get_weather")),
+    "benign tool should not be flagged"
+  );
+});
