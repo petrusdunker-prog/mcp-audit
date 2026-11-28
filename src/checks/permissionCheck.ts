@@ -5,8 +5,10 @@ export interface ToolSummary {
   description?: string;
 }
 
-// A name that reads as a getter/reader.
-const NARROW_NAME_PATTERN = /^(get|read|list|fetch|lookup|describe|view|check|query)[_-]/i;
+// A name that reads as a getter/reader. Exported for reuse by the dynamic
+// probe check (Phase 9), which only ever auto-calls tools that already
+// look read-only by this same name convention.
+export const NARROW_NAME_PATTERN = /^(get|read|list|fetch|lookup|describe|view|check|query)[_-]/i;
 
 // Verbs that imply a mutating or dangerous action. Deliberately narrow and
 // specific (not "all"/"every"/"admin") — those showed up constantly in

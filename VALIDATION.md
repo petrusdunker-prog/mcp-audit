@@ -218,3 +218,44 @@ weight of evidence as the static checks have. The roadmap's own warning
 about this check (high false-positive risk, needs the same
 tune-against-real-servers process) still holds for anything beyond these
 three narrow, well-documented patterns.
+
+## Addendum: dynamic probing, real-server validation (Phase 9)
+
+This phase is different in kind from every other check validated in this
+document: `mcp-audit probe` actually *calls* a tool rather than reading
+metadata about it, which is why it got narrower rails from the start
+(stdio-only, read-only-named tools only, deliberately malformed arguments
+only — see the README's "Dynamic probing" section) and a narrower
+validation sample to match.
+
+**Why official servers only, not a community sample.** Every other check's
+validation runs (the 17-repo secret-check sample, the 5-server
+prompt-injection sample) only ever read something — cloned source, or a
+declared tool list. Calling a community server's real tools, even
+read-only-named ones with garbage arguments, is a different enough action
+that it wasn't repeated here without a more specific reason to target a
+particular server. Validated instead against the three official reference
+servers already used throughout this project, launched locally — a server
+you launch yourself via `npx` is exactly the kind of server this feature
+exists to be run against in the first place.
+
+**A real false positive, caught before shipping.** The first version of
+the "extreme value" input-validation test substituted a large negative
+number for any required `number`/`integer` field with no further
+reasoning. Run against the real `server-everything` reference server, this
+flagged its `get-sum` tool for "accepting malformed input" — except a
+plain `number` field with no declared `minimum`/`maximum` has no actual
+out-of-bounds value, and a sum function correctly summing a large negative
+number isn't a validation gap, it's arithmetic working. Fixed by only
+treating a numeric value as "extreme" when the schema actually declares a
+bound to violate (sending `minimum - 1` or `maximum + 1`); with no declared
+bound, that field is left as a plain valid value and doesn't count toward
+the finding. Re-run after the fix: `get-sum` no longer flagged, while
+`get-header-params` (a real string-input tool that accepts empty/oversized
+values without validation) correctly still is.
+
+**Results**: `server-everything` (16 tools, 8 probed), `server-memory` (9
+tools, 1 probed), `server-sequential-thinking` (1 tool, 0 probed — no
+read-only-named tools at all). One genuine, correctly-scoped finding
+(`get-header-params`'s weak string validation); zero remaining false
+positives after the fix above.

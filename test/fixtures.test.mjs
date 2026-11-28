@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { auditSource, auditLive } from "../dist/index.js";
+import { auditProbe } from "../dist/modes/probe.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => path.join(__dirname, "..", "test-fixtures", name);
@@ -104,3 +105,30 @@ test("prompt injection (live): fake role marker, override language, and hidden U
     "benign tool should not be flagged"
   );
 });
+
+test(
+  "dynamic probe: well-validated tool is clean, weak validation and a hang are both caught, mutating tool is never called",
+  async () => {
+    const report = await auditProbe({
+      command: "npx",
+      args: ["tsx", fixture("live-dynamic-probe/server.ts")],
+    });
+
+    assert.ok(
+      !report.findings.some((f) => f.id.includes(".get_user.")),
+      "the well-validated tool should produce no findings"
+    );
+    assert.ok(
+      report.findings.some((f) => f.id.startsWith("probe.input-validation.get_item.")),
+      "weak validation on get_item should be caught"
+    );
+    assert.ok(
+      report.findings.some((f) => f.id.startsWith("probe.crash.get_slow.")),
+      "the hanging tool should be classified as a crash/timeout, not silently accepted"
+    );
+    assert.ok(
+      !report.findings.some((f) => f.id.includes("delete_everything")),
+      "a mutating-named tool must never be auto-called by the probe"
+    );
+  }
+);

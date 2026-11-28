@@ -98,7 +98,7 @@
     {
       "id": "secret.summary",
       "severity": "info",
-      "title": "Scanned 35 file(s) for leaked secrets",
+      "title": "Scanned 38 file(s) for leaked secrets",
       "detail": "3 known-format match(es), 6 generic suspicious-assignment match(es)."
     }
   ]

@@ -5,9 +5,9 @@ authentication, vulnerable dependencies, leaked secrets, and overly broad tool
 permissions — the kind of issues that show up repeatedly across public MCP
 servers today.
 
-## Status: Phase 8 (prompt-injection heuristics for Mode B)
+## Status: Phase 9 (dynamic input-validation + rate-limit probing)
 
-Two scan modes:
+Three scan modes:
 
 - **Mode A — source scan** (`mcp-audit scan <path>`): static analysis of a
   cloned MCP server's code and config.
@@ -45,6 +45,20 @@ Two scan modes:
     Unicode characters (zero-width spaces, Unicode Tag characters, bidi
     overrides — the "ASCII smuggling" technique). Not a general "sounds
     suspicious" filter — three specific, documented patterns, nothing else.
+- **Mode C — dynamic probing** (`mcp-audit probe <command> [args...]`,
+  **opt-in, never run as part of `scan`/`live`**): the only mode that
+  actually *calls* a tool rather than reading metadata about it. Read the
+  "Dynamic probing" section below in full before using this — it carries
+  real blast-radius in a way nothing else here does.
+  - Input-validation check: for every tool whose name already passes the
+    read-only heuristic, derives a small set of deliberately malformed
+    arguments from the tool's own declared schema (missing required
+    fields, wrong types, out-of-declared-bounds values, oversized strings)
+    and calls it, checking whether the server validates or accepts/crashes
+    on each.
+  - Rate-limit check: a small, capped burst of repeated calls (10, not an
+    unbounded flood) against one read-only-named tool, checking whether
+    any response mentions rate-limiting/throttling explicitly.
 
 This is a heuristic tool, not a guarantee. It's intentionally conservative —
 each check so far has been tuned against real false positives found by
@@ -68,6 +82,15 @@ not just synthetic fixtures:
   two popular community servers) with zero false positives so far — see
   `VALIDATION.md` for the real text-extraction bug this testing caught
   before it shipped.
+- **Dynamic probing**: validated against 3 real official servers (not
+  community servers this time — see "Dynamic probing" below for why).
+  Caught a real false positive before it shipped: an early version flagged
+  the reference server's own `get-sum` tool for "accepting" an extreme
+  negative number as a required field, but a plain `number` with no
+  declared `minimum`/`maximum` has no actual out-of-bounds value — a sum
+  function correctly summing a large negative number isn't a validation
+  gap. Fixed by only generating an "extreme" value when the schema
+  actually declares a bound to violate.
 
 ## Usage
 
@@ -92,6 +115,39 @@ node dist/cli.js live --format json npx -y @modelcontextprotocol/server-everythi
 # Exit 1 if any finding is at least this severe — for CI
 node dist/cli.js scan ./path --fail-on high
 ```
+
+### Dynamic probing
+
+**Read this before using `probe` — it's different from everything else in
+this tool.** Every other command only ever reads something: a file, a
+cloned repo, a declared tool list. `probe` actually *calls* tools, which
+means a call can have a real side effect, not just report on one.
+
+```bash
+node dist/cli.js probe npx -y @modelcontextprotocol/server-everything
+```
+
+Three rails are built into the command itself, not just documented:
+
+1. **Stdio only — there's no `--url` option on this command at all.** A
+   stdio target is something you're launching yourself, locally, right
+   now; a URL could be anyone's remote infrastructure. This tool will not
+   dynamically probe a target over the network.
+2. **Only tools whose name already passes the read-only heuristic
+   (`get_`/`read_`/`list_`/`fetch_`/...) are ever called.** Anything else
+   — anything that reads as mutating — is listed as skipped, never
+   invoked.
+3. **Every argument sent is deliberately malformed** (empty, wrong-typed,
+   out-of-declared-bounds, oversized) — never real-looking data. The point
+   is testing whether the tool validates its input, not using the tool for
+   its real purpose.
+
+Even with those rails, "only calls read-only-named tools" is a heuristic
+about a name, not a guarantee about behavior — a tool can be named `get_x`
+and still do something you wouldn't want done 10+ times in a row (the rate
+check) or with garbage input (the validation check). Only run this against
+a server whose tools you've actually looked at, ideally one you wrote or
+one you're already comfortable calling by hand.
 
 ### Drift detection (baselining)
 
@@ -199,6 +255,12 @@ version with a long-settled historical CVE, so it won't age out):
   tool and three carrying a different injection technique each (fake role
   marker, override language, hidden Unicode), used to validate the
   prompt-injection check end-to-end.
+- `live-dynamic-probe/` — a runnable stdio server with a well-validated
+  tool (negative control), a tool with no validation at all, a tool that
+  always hangs past the probe's timeout (validates the crash/timeout path
+  without actually crashing the process), and a mutating-named tool whose
+  handler throws if it's ever called — a hard check that the probe really
+  never auto-calls it.
 
 Everything else is read as text only, never executed. (The committed Slack
 token test is the exception that proves this isn't just a formality — it's
@@ -242,6 +304,17 @@ one-off manual checks used while building each phase — this is what CI runs.
   against an API's own regex, for instance) — there's no general way to
   tell "this is a stored value" from "this is a shape being checked for"
   without deeper code analysis than this tool does.
+- **Dynamic probing only exercises what it can derive from a declared
+  schema, and only on tools whose name already looks read-only.** A
+  `boolean`/`array`/`object` field, or a `number`/`string` field with no
+  declared bound, has no "extreme" value this check can justify sending —
+  those fields fall back to a plain valid value rather than being tested.
+  The rate-limit check is a small, capped burst (10 calls); a server that
+  only throttles at higher volume won't show anything here, and that's
+  reported as "nothing observed at this scale," not "no rate limiting
+  exists." Validated against official reference servers only, not a
+  community sample like the other checks — see `VALIDATION.md` for why
+  that line was drawn differently here.
 - Every check here is a heuristic, not a guarantee — see the specific
   caveats in each check's own section above.
 
@@ -272,11 +345,18 @@ one-off manual checks used while building each phase — this is what CI runs.
    realistically sits — on its own line). Mode A (static) coverage and
    output-content scanning (vs. just declared metadata) are both out of
    scope — this tool only ever introspects a tool list, it never calls one.
-9. **Dynamic/live probing (planned, not started).** Behavioral checks beyond
-   "did it accept zero credentials" — input validation, rate-limiting.
-   Ethically narrower in scope than the static checks: only ever run against
-   servers you control yourself, never third-party infrastructure without
-   permission.
+9. ~~Dynamic/live probing~~ — a new, deliberately separate opt-in command
+   (`mcp-audit probe`, never part of `scan`/`live`): input-validation
+   testing (malformed args derived from a tool's own schema) and a capped
+   rate-limit check, only ever against stdio targets (no `--url`) and only
+   ever calling tools whose name already looks read-only. The first mode
+   in this tool that actually calls a tool rather than reading metadata
+   about it — see the README's own "Dynamic probing" section for the
+   safety rails that distinction demanded. Caught and fixed a real false
+   positive before shipping (an unbounded numeric field flagged as
+   "accepting" a merely large number) — see `VALIDATION.md`.
+
+This closes out the originally-planned roadmap (phases 0-9) end to end.
 
 **Explicitly out of scope for this roadmap:** watching actual tool-call
 traffic in real time to catch a tool doing something beyond what it was

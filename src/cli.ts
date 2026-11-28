@@ -3,6 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { Command } from "commander";
 import { auditSource } from "./modes/sourceScan.js";
 import { auditLive } from "./modes/liveIntrospect.js";
+import { auditProbe } from "./modes/probe.js";
 import { printReport, toJson } from "./report.js";
 import { toSarif } from "./sarif.js";
 import { hasFindingAtOrAbove } from "./severity.js";
@@ -151,5 +152,19 @@ program
       emitReport(report, { format: opts.format as OutputOpts["format"], failOn: opts.failOn as Severity | undefined });
     }
   );
+
+program
+  .command("probe <command> [args...]")
+  .description(
+    "Dynamic input-validation + rate-limit probing (opt-in, stdio-only — never --url, see README before using this)"
+  )
+  .passThroughOptions()
+  .enablePositionalOptions()
+  .option("--format <format>", "text, json, or sarif", "text")
+  .option("--fail-on <severity>", `exit 1 if any finding is at least this severe (${SEVERITIES.join("|")})`)
+  .action(async (command: string, args: string[], opts: { format: string; failOn?: string }) => {
+    const report = await auditProbe({ command, args });
+    emitReport(report, { format: opts.format as OutputOpts["format"], failOn: opts.failOn as Severity | undefined });
+  });
 
 program.parseAsync(process.argv);
