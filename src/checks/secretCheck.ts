@@ -29,20 +29,44 @@ interface KnownPattern {
 
 // Specific, low-false-positive formats: if one of these matches, it's very
 // likely a real credential shape (as opposed to the generic heuristic below,
-// which is much noisier).
+// which is much noisier). Two of these are tightened beyond the obvious
+// prefix match, based on real false positives found scanning a public
+// repo (AgentValet/AgentValet) that itself handles/validates/documents
+// private keys and tokens:
+//  - private-key-block: the original matched just the header text, so any
+//    code *constructing* that header (e.g. a template literal wrapping a
+//    runtime value) matched with no real key material present. Real key
+//    material is a long base64 blob between the markers — require it.
+//  - slack-token: the original matched any xox[baprs]- prefix with enough
+//    trailing characters, so "xoxb-real-token-here" (a placeholder in a
+//    doc comment) matched. Real Slack tokens have a specific
+//    digit-digit-random shape; require it. (This exact fix mirrors one
+//    AgentValet's own secret-scanner script had already made, with a
+//    comment explaining the same false positive.)
 const KNOWN_FORMAT_PATTERNS: KnownPattern[] = [
-  { id: "aws-access-key-id", label: "AWS Access Key ID", regex: /AKIA[0-9A-Z]{16}/ },
-  { id: "github-token", label: "GitHub token", regex: /gh[pousr]_[A-Za-z0-9]{36,}/ },
-  { id: "github-pat-fine-grained", label: "GitHub fine-grained PAT", regex: /github_pat_[A-Za-z0-9_]{70,}/ },
-  { id: "slack-token", label: "Slack token", regex: /xox[baprs]-[A-Za-z0-9-]{10,48}/ },
-  { id: "stripe-live-key", label: "Stripe live secret key", regex: /sk_live_[0-9a-zA-Z]{20,}/ },
-  { id: "google-api-key", label: "Google API key", regex: /AIza[0-9A-Za-z\-_]{35}/ },
+  { id: "aws-access-key-id", label: "AWS Access Key ID", regex: /AKIA[0-9A-Z]{16}/g },
+  { id: "github-token", label: "GitHub token", regex: /gh[pousr]_[A-Za-z0-9]{36,}/g },
+  { id: "github-pat-fine-grained", label: "GitHub fine-grained PAT", regex: /github_pat_[A-Za-z0-9_]{70,}/g },
+  { id: "slack-token", label: "Slack token", regex: /\bxox[baprs]-\d{9,}-\d{9,}-[A-Za-z0-9]{20,}/g },
+  { id: "stripe-live-key", label: "Stripe live secret key", regex: /sk_live_[0-9a-zA-Z]{20,}/g },
+  { id: "google-api-key", label: "Google API key", regex: /AIza[0-9A-Za-z\-_]{35}/g },
   {
     id: "private-key-block",
     label: "Private key block",
-    regex: /-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/,
+    regex: /-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\r\n]+[A-Za-z0-9+/=\s]{100,}/g,
   },
 ];
+
+// Applied to the full matched text of a known-format hit — unlike
+// PLACEHOLDER_PATTERN below (which only checks the generic heuristic's
+// captured value, anchored at the start), this searches anywhere in the
+// match, since a placeholder word can appear after a real-looking prefix
+// ("ghp_EXAMPLEonlyNotARealToken...", or AWS's own canonical
+// "AKIAIOSFODNN7EXAMPLE" — literally AWS's documented example key). Safe to
+// check broadly here: a real high-entropy credential matching one of these
+// tight formats essentially never coincidentally spells an English word.
+const KNOWN_FORMAT_PLACEHOLDER_PATTERN =
+  /example|placeholder|dummy|fake|changeme|change[_-]me|insert|replace|notreal|not[_-]a[_-]real|\byour\b/i;
 
 // Generic signal: a string literal assigned to a credential-sounding name.
 // Much noisier than the known-format patterns — flagged at lower severity
@@ -96,10 +120,18 @@ export async function checkSecrets(repoPath: string): Promise<Finding[]> {
     const rel = toRelPosix(repoPath, file);
 
     for (const pattern of KNOWN_FORMAT_PATTERNS) {
-      if (pattern.regex.test(content)) {
+      const regex = new RegExp(pattern.regex);
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(content))) {
+        if (KNOWN_FORMAT_PLACEHOLDER_PATTERN.test(match[0])) continue;
         knownHits++;
+        // Hash of the matched text, not position — same reasoning as the
+        // generic check's id below: stable across unrelated edits, and
+        // lets two different real matches of the same pattern in one file
+        // show up as distinct findings instead of colliding.
+        const matchHash = createHash("sha1").update(match[0]).digest("hex").slice(0, 10);
         findings.push({
-          id: `secret.known.${pattern.id}.${rel}`,
+          id: `secret.known.${pattern.id}.${rel}.${matchHash}`,
           severity: "critical",
           title: `Likely ${pattern.label} found in ${rel}`,
           detail: `Matched the known shape of a ${pattern.label}. If this is real, rotate the credential and scrub it from git history, not just this file.`,

@@ -42,7 +42,22 @@ test("deps: a clean pinned package produces no vuln finding", async () => {
 
 test("secrets: a known-format credential is flagged critical", async () => {
   const report = await auditSource(fixture("secret-known"));
-  assert.ok(severities(report).includes("critical"));
+  const criticals = report.findings.filter((f) => f.severity === "critical");
+  // AWS, GitHub, and private-key — one real-shaped example of each. Slack
+  // is tested separately (test/secret-stability.test.mjs), built at
+  // runtime rather than committed, since a committed real-shaped Slack
+  // token trips GitHub's own push protection.
+  assert.equal(criticals.length, 3, "expected all three committed known-format patterns to fire");
+});
+
+test("secrets: known-format placeholders/examples are NOT flagged (regression for the AgentValet false positives)", async () => {
+  const report = await auditSource(fixture("secret-known-placeholder"));
+  const secretFindings = report.findings.filter((f) => f.id.startsWith("secret.") && f.id !== "secret.summary");
+  assert.equal(
+    secretFindings.length,
+    0,
+    `expected zero secret findings on pure placeholders/examples, got: ${secretFindings.map((f) => f.title).join(", ")}`
+  );
 });
 
 test("secrets: a generic credential-sounding literal is flagged medium, not critical", async () => {

@@ -40,3 +40,24 @@ test("two different credential-sounding literals in the same file get different 
   assert.equal(ids.length, 2);
   assert.notEqual(ids[0], ids[1]);
 });
+
+// Built at runtime (never a contiguous literal in this file's own source,
+// and only ever written to an ephemeral temp file, never committed) so
+// nothing here trips GitHub's own push protection the way a committed
+// fixture with this exact shape did — see test-fixtures/secret-known/
+// for why that case moved here instead.
+const FAKE_SLACK_TOKEN = ["xoxb", "0".repeat(12), "0".repeat(12), "A".repeat(24)].join("-");
+
+test("slack-token pattern requires real digit-digit-random structure, not just the prefix", async () => {
+  const realShaped = await scanWithContent(`export const TOKEN = "${FAKE_SLACK_TOKEN}";\n`);
+  assert.ok(
+    realShaped.some((f) => f.id.startsWith("secret.known.slack-token")),
+    "a correctly-shaped token should still be flagged"
+  );
+
+  const looseShapedOnly = await scanWithContent('export const TOKEN = "xoxb-your-token-here";\n');
+  assert.ok(
+    !looseShapedOnly.some((f) => f.id.startsWith("secret.known.slack-token")),
+    "a prefix-only placeholder should not be flagged"
+  );
+});

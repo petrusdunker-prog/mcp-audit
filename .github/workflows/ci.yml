@@ -27,13 +27,16 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
-      # No fail-on here deliberately: test-fixtures/ contains credentials
-      # and auth gaps on purpose, to validate the checks themselves (see
-      # test/fixtures.test.mjs). Hardcoding an exclusion for a directory
-      # named "test-fixtures" into the checks would weaken them for real
-      # users who might have a genuinely vulnerable directory by that same
-      # name — so this upload is for visibility/triage, not a hard gate.
+      # test-fixtures/ contains credentials and auth gaps on purpose, to
+      # validate the checks themselves (see test/fixtures.test.mjs) — a
+      # plain fail-on would always trip on those. .mcp-audit-baseline.json
+      # is this repo's own accepted state (every current finding is either
+      # an intentional fixture or already reviewed); fail-on here only
+      # fires on something genuinely NEW, which is exactly what we want
+      # dogfooded on our own repo.
       - name: Scan this repo with its own action
         uses: ./
         with:
           path: "."
+          baseline-file: ".mcp-audit-baseline.json"
+          fail-on: "critical"

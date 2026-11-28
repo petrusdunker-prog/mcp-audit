@@ -17,6 +17,18 @@ inputs:
     description: "Where to write the SARIF report before uploading it."
     required: false
     default: "mcp-audit-results.sarif"
+  baseline-file:
+    description: >-
+      Path to a baseline report committed in this repo (create one locally
+      with `mcp-audit scan <path> --write-baseline <file>`, review it, then
+      commit it like you would a lockfile or a snapshot-test update). When
+      set, fail-on applies only to findings that are NEW since that
+      baseline, not the whole scan — so the job doesn't fail every run over
+      issues someone already reviewed and accepted. The SARIF upload still
+      reflects the full current state either way. Leave empty to fail on
+      every finding at or above the threshold, as if no baseline existed.
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -36,12 +48,13 @@ runs:
       working-directory: ${{ github.action_path }}
       run: npm run build
 
-    # Runs the scan exactly once. Exit code is captured (not let to fail
-    # this step directly) so the SARIF upload below still happens even when
-    # --fail-on trips — alerts should land in the Security tab regardless
-    # of whether the job itself ends up red.
+    # No baseline configured: one pass does everything, same as before
+    # baseline support existed. Exit code is captured rather than let to
+    # fail this step directly, so the SARIF upload below still happens even
+    # when --fail-on trips.
     - name: Run mcp-audit scan
-      id: scan
+      id: scan-plain
+      if: ${{ inputs.baseline-file == '' }}
       shell: bash
       run: |
         set +e
@@ -52,12 +65,46 @@ runs:
         node "${{ github.action_path }}/dist/cli.js" scan "${{ inputs.path }}" --format sarif "${FAIL_ON_ARGS[@]}" > "${{ inputs.sarif-file }}"
         echo "exit-code=$?" >> "$GITHUB_OUTPUT"
 
+    # Baseline configured: this pass produces the SARIF (the full current
+    # state, for the Security tab) but never applies --fail-on itself —
+    # that job belongs to the "Diff against baseline" step below, which
+    # only fails on NEW findings. --baseline and --format sarif together
+    # aren't supported by the CLI (see cli.ts), so these stay two passes.
+    - name: Run mcp-audit scan (baseline mode — SARIF pass)
+      if: ${{ inputs.baseline-file != '' }}
+      shell: bash
+      run: |
+        node "${{ github.action_path }}/dist/cli.js" scan "${{ inputs.path }}" --format sarif > "${{ inputs.sarif-file }}"
+
     - name: Upload SARIF to code scanning
       uses: github/codeql-action/upload-sarif@v4
       with:
         sarif_file: ${{ inputs.sarif-file }}
 
+    # Baseline configured: the actual pass/fail signal, and a human-readable
+    # summary on the run page. Exit code is captured rather than let to fail
+    # this step directly, for the same reason as the no-baseline path above
+    # (though there's nothing left to upload after this one — it's here for
+    # consistency and so a future step could rely on the same pattern).
+    - name: Diff against baseline
+      id: scan-baseline
+      if: ${{ inputs.baseline-file != '' }}
+      shell: bash
+      run: |
+        set +e
+        FAIL_ON_ARGS=()
+        if [ -n "${{ inputs.fail-on }}" ]; then
+          FAIL_ON_ARGS=(--fail-on "${{ inputs.fail-on }}")
+        fi
+        node "${{ github.action_path }}/dist/cli.js" scan "${{ inputs.path }}" --baseline "${{ inputs.baseline-file }}" --format text "${FAIL_ON_ARGS[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+        echo "exit-code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
     - name: Fail job if findings met the --fail-on threshold
-      if: ${{ inputs.fail-on != '' && steps.scan.outputs.exit-code != '0' }}
+      if: ${{ inputs.baseline-file == '' && inputs.fail-on != '' && steps.scan-plain.outputs.exit-code != '0' }}
+      shell: bash
+      run: exit 1
+
+    - name: Fail job if NEW findings met the --fail-on threshold (baseline)
+      if: ${{ inputs.baseline-file != '' && inputs.fail-on != '' && steps.scan-baseline.outputs.exit-code != '0' }}
       shell: bash
       run: exit 1

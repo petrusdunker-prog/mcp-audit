@@ -5,7 +5,7 @@ authentication, vulnerable dependencies, leaked secrets, and overly broad tool
 permissions — the kind of issues that show up repeatedly across public MCP
 servers today.
 
-## Status: Phase 5 (validated against 17 real public servers — see `VALIDATION.md`)
+## Status: Phase 7 (drift detection — baseline a scan, diff future ones against it)
 
 Two scan modes:
 
@@ -74,6 +74,34 @@ node dist/cli.js live --format json npx -y @modelcontextprotocol/server-everythi
 node dist/cli.js scan ./path --fail-on high
 ```
 
+### Drift detection (baselining)
+
+A scan is a snapshot. `--baseline`/`--write-baseline` give it memory between
+runs, so you can ask "what changed" instead of re-reading the same report
+every time:
+
+```bash
+# First time: accept the current state as the baseline
+node dist/cli.js scan ./path --write-baseline .mcp-audit-baseline.json
+
+# Later: diff against it — only NEW and RESOLVED findings are shown,
+# unchanged ones (already-accepted state) are silent
+node dist/cli.js scan ./path --baseline .mcp-audit-baseline.json
+
+# --fail-on in baseline mode only looks at NEW findings
+node dist/cli.js scan ./path --baseline .mcp-audit-baseline.json --fail-on critical
+
+# Diff against the old baseline, then accept the new state in one command
+node dist/cli.js scan ./path --baseline .mcp-audit-baseline.json --write-baseline .mcp-audit-baseline.json
+```
+
+The baseline file is meant to be committed to the repo, like a lockfile —
+update it the same way you'd accept an updated snapshot test, after
+reviewing what changed. `--baseline` doesn't support `--format sarif` (SARIF
+results aren't naturally "new vs. resolved" — see the GitHub Action section
+for how the two combine instead). Mode B (live) baselining isn't supported
+yet — only `scan`.
+
 ### GitHub Action
 
 Published at [petrusdunker-prog/mcp-audit](https://github.com/petrusdunker-prog/mcp-audit).
@@ -83,17 +111,34 @@ repo:
 ```yaml
 - uses: petrusdunker-prog/mcp-audit@main
   with:
-    path: .            # repo to scan, default "."
-    fail-on: high      # optional; omit to never fail the job on findings
+    path: .                                   # repo to scan, default "."
+    fail-on: high                             # optional; omit to never fail the job on findings
+    baseline-file: .mcp-audit-baseline.json    # optional; see below
 permissions:
   security-events: write  # required for the SARIF upload step
 ```
 
-It builds the tool, runs `scan --format sarif`, uploads the result via
-`github/codeql-action/upload-sarif` (alerts show up in the repo's Security
-tab), and — if `fail-on` is set — fails the job afterward without needing a
-second scan. See `.github/workflows/ci.yml` for this repo's own CI, including
-a self-scan job that dogfoods the action against its own source.
+Without `baseline-file`: it builds the tool, runs `scan --format sarif`,
+uploads the result via `github/codeql-action/upload-sarif` (alerts show up
+in the repo's Security tab), and — if `fail-on` is set — fails the job
+afterward without needing a second scan.
+
+With `baseline-file` set to a committed baseline (see "Drift detection"
+above — create and commit this yourself first; the Action never writes one
+for you, since the whole point is a human reviewing what's being accepted):
+the SARIF pass still runs and uploads the full current state regardless, but
+`fail-on` is evaluated by a separate diff-against-baseline pass instead, so
+it only fails the job on findings that are NEW since the baseline — not the
+whole scan. That pass's output also lands in the run's job summary. This is
+genuinely two scans in that mode (SARIF can't represent "new vs. resolved"
+the way a diff can), both still run after the point where alerts have
+already been uploaded.
+
+See `.github/workflows/ci.yml` for this repo's own CI, including a
+self-scan job that dogfoods the action — with a real baseline
+(`.mcp-audit-baseline.json`, committed in this repo) and `fail-on: critical`
+against it, so it only fails on something genuinely new, not the
+intentional findings in `test-fixtures/`.
 
 ## Test fixtures
 
@@ -139,6 +184,19 @@ one-off manual checks used while building each phase — this is what CI runs.
   that merely mentions `token=`/`secret:` syntax inside a comment. This is
   why it sits at MEDIUM with "verify manually" wording rather than CRITICAL —
   but don't read a MEDIUM hit as "probably a real leak" without checking.
+- **Known-format patterns can still false-positive on code that *handles*
+  secrets rather than leaking one** — found by scanning a real security-
+  conscious project (`AgentValet/AgentValet`) that itself parses/validates
+  private keys and tokens. Fixed what was reproducible: the private-key and
+  Slack-token patterns now require real key material/token structure (not
+  just the header/prefix), and every known-format match is checked against
+  an obvious-placeholder filter (catches AWS's own canonical
+  `AKIAIOSFODNN7EXAMPLE`, `ghp_EXAMPLE...`, etc.). What's *not* fully
+  fixed: a pattern can still match inside code whose job is literally to
+  detect or compare against that exact shape (a string-comparison check
+  against an API's own regex, for instance) — there's no general way to
+  tell "this is a stored value" from "this is a shape being checked for"
+  without deeper code analysis than this tool does.
 - Every check here is a heuristic, not a guarantee — see the specific
   caveats in each check's own section above.
 
@@ -150,13 +208,14 @@ one-off manual checks used while building each phase — this is what CI runs.
 4. ~~Secret leakage + permission over-reach checks~~
 5. ~~Reporting polish (SARIF) + GitHub Action~~
 6. ~~Validation run against public servers + publish findings~~ (see `VALIDATION.md`)
-7. **Drift/integrity detection (planned, not started).** Give the tool memory
-   between runs: hash the sensitive surfaces (auth code, the tool manifest,
-   `.env`, the dependency lockfile) at scan time, store a small baseline,
-   diff on the next run. Flags changes that happened without anyone
-   explicitly reviewing them as security-relevant — a tool's permissions
-   quietly widening, auth code disappearing from a file. Fits the GitHub
-   Action naturally: compare a PR's scan against main's last baseline.
+7. ~~Drift/integrity detection~~ — diffs two scans by finding id (a baseline
+   is just a saved report) rather than hashing raw files; `scan` gets
+   `--baseline`/`--write-baseline`; validated against real history (two
+   snapshots of the official filesystem server 12 weeks apart — see
+   `VALIDATION.md`); wired into the Action via `baseline-file`, dogfooded on
+   this repo's own CI with a real committed baseline. Mode B (live)
+   baselining and pairing "same category got worse" into one escalation
+   entry are still out of scope — plain new/resolved already does the job.
 8. **Prompt-injection heuristics (planned, not started).** Scan tool
    descriptions/outputs for language that reads like it's trying to
    manipulate the calling LLM rather than describe the tool. High
