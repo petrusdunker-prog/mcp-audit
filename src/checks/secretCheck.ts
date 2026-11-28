@@ -1,4 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import type { Finding } from "../types.js";
 import { toRelPosix } from "../relPath.js";
@@ -113,8 +114,14 @@ export async function checkSecrets(repoPath: string): Promise<Finding[]> {
       const value = match[2];
       if (PLACEHOLDER_PATTERN.test(value)) continue;
       genericHits++;
+      // Identity is the matched keyword+value, not the character offset —
+      // an unrelated edit earlier in the file shifts every later offset,
+      // which would otherwise make drift detection (Phase 7) see the same
+      // literal match as "resolved" and "new" on the next run for no real
+      // reason. Hash just keeps the id short and filename-safe.
+      const matchHash = createHash("sha1").update(`${match[1]}:${value}`).digest("hex").slice(0, 10);
       findings.push({
-        id: `secret.generic.${rel}.${match.index}`,
+        id: `secret.generic.${rel}.${matchHash}`,
         severity: "medium",
         title: `Possible hardcoded credential in ${rel}`,
         detail: `Found a string literal assigned to a credential-sounding name: "${match[0].slice(0, 80)}". Could be real, or a test/example value — this heuristic can't tell the difference, verify manually.`,

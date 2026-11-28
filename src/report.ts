@@ -1,13 +1,5 @@
-import type { AuditReport, Severity } from "./types.js";
-import { severityRank } from "./severity.js";
-
-const SEVERITY_LABEL: Record<Severity, string> = {
-  critical: "[CRITICAL]",
-  high: "[HIGH]",
-  medium: "[MEDIUM]",
-  low: "[LOW]",
-  info: "[INFO]",
-};
+import type { AuditReport } from "./types.js";
+import { severityRank, SEVERITY_LABEL } from "./severity.js";
 
 export function printReport(report: AuditReport): void {
   console.log(`\nmcp-audit report — target: ${report.target} (mode: ${report.mode})\n`);

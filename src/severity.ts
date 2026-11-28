@@ -2,6 +2,14 @@ import type { AuditReport, Severity } from "./types.js";
 
 export const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
 
+export const SEVERITY_LABEL: Record<Severity, string> = {
+  critical: "[CRITICAL]",
+  high: "[HIGH]",
+  medium: "[MEDIUM]",
+  low: "[LOW]",
+  info: "[INFO]",
+};
+
 export function severityRank(s: Severity): number {
   return SEVERITY_ORDER.indexOf(s);
 }
